@@ -1,0 +1,382 @@
+/*-- scss:defaults --*/
+
+// ADDED: load Lato for body text
+@import url("https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap");
+
+// =====================================================================
+//  STATE BRAND PALETTE  (colors only — layout/structure left untouched)
+// =====================================================================
+// PRIMARY ("the storefront" — unified state-level look)
+$brand-black:    #000000;
+$brand-navy:     #071D49;
+$brand-blue:     #093692;
+$brand-sky:      #81D0F0;
+$brand-white:    #FFFFFF;
+
+// SECONDARY (division / program / initiative + campaign materials)
+$brand-brown:    #2C1E1B;
+$brand-gold:     #A47217;
+$brand-green:    #007000;
+$brand-sage:     #C6D0BE;   // was "#C6DOBE" in spec — O -> 0 (hex must be 0-9/A-F)
+$brand-bluegray: #A6C4CA;
+$brand-red:      #9B1B15;
+
+// ---------------------------------------------------------------------
+//  Theme color mapping (navbar bg, headings, links, active tab follow
+//  $primary; the theme keeps WHITE navbar text -> high contrast).
+// ---------------------------------------------------------------------
+$primary:    $brand-blue;    // #093692 medium blue
+$secondary:  $brand-navy;
+$body-bg:    $brand-white;
+$body-color: #353535;
+// ---------------------------------------------------------------------
+//  Links — Sandstone defaults these to its own light green (#93c54b).
+//  Point them at the brand green instead.
+// ---------------------------------------------------------------------
+$success:           $brand-green;   // #007000 — also fixes any .text-success
+$link-color:        $brand-green;
+$link-hover-color:  darken($brand-green, 8%);
+
+// ---------------------------------------------------------------------
+//  FONTS — UT Industry for headings/titles, Lato for body text everywhere
+// ---------------------------------------------------------------------
+$headings-font-family: "UT Industry", system-ui, -apple-system, sans-serif;
+$headings-font-weight: 700;
+$font-family-base: "Lato", system-ui, -apple-system, sans-serif;   // ADDED: body = Lato
+
+/*-- scss:rules --*/
+
+// Self-hosted brand face (Option B). WOFF2 preferred, TTF fallback so it
+// works today even if you haven't converted to web format yet.
+@font-face {
+  font-family: "UT Industry";
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/UTIndustry-Regular.woff") format("woff"),
+       url("fonts/UTIndustry-Regular.ttf")   format("truetype");
+}
+@font-face {
+  font-family: "UT Industry";
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/UTIndustry-Medium.woff") format("woff"),
+       url("fonts/UTIndustry-Medium.ttf")   format("truetype");
+}
+@font-face {
+  font-family: "UT Industry";
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/UTIndustry-Bold.woff") format("woff"),
+       url("fonts/UTIndustry-Bold.ttf")   format("truetype");
+}
+@font-face {
+  font-family: "UT Industry";
+  font-weight: 800;
+  font-display: swap;
+  src: url("fonts/UTIndustry-Heavy.woff") format("woff"),
+       url("fonts/UTIndustry-Heavy.ttf")   format("truetype");
+}
+
+// Dashboard title bar and card headers aren't h1-h6, so point them at
+// the brand face explicitly.
+.navbar-title,
+.navbar-brand,
+.card-header,
+.card-title {
+  font-family: "UT Industry", system-ui, -apple-system, sans-serif;
+  color: $brand-navy;
+  font-weight: 700;
+}
+
+// Put the navbar title back to the light theme color
+.navbar .navbar-brand,
+.navbar .navbar-title {
+  color: #e9ecef;
+  font-weight: 600;   // or 400 if you don't want it bold
+}
+
+// ---------------------------------------------------------------------
+//  Original component rules (unchanged — no sizing/height rules)
+// ---------------------------------------------------------------------
+.navbar {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.card {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: none;
+  margin-bottom: 1rem;
+}
+
+.value-box {
+  border: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tab-content {
+  padding: 1rem;
+}
+
+.datatable-container {
+  padding: 1rem;
+  background: $brand-white;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+table.dataTable,
+table.dataTable th,
+table.dataTable td {
+  font-family: "UT Industry", serif;
+}
+
+@media (max-width: 768px) {
+  .value-box {
+    margin-bottom: 1rem;
+  }
+  .tab-content {
+    padding: 0.5rem;
+  }
+}
+
+/* custom-june4.scss */
+.tab-content,
+.tab-pane {
+  height: 100%;
+}
+.tab-content .html-fill-container,
+.tab-content .plotly.html-widget {
+  height: 100% !important;
+}
+
+/* custom-june4.scss */
+.header { margin: 0 0 0.5rem 0; }
+.header h3 { margin: 0; }
+
+
+/* Always-visible, branded "expand to full screen" control on cards */
+.bslib-card .bslib-full-screen-enter {
+  display: inline-flex !important;
+  opacity: 0.55 !important;            /* subtle, not attention-grabbing */
+  background-color: #e0e0e0;           /* light grey */
+  color: #555;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-family: "Lato", sans-serif;
+  font-size: 0.72rem;
+  box-shadow: none;
+}
+.bslib-card .bslib-full-screen-enter:hover {
+  opacity: 1 !important;
+  background-color: #cfcfcf;           /* slightly darker on hover */
+}
+.bslib-card .bslib-full-screen-enter::after {
+  content: "Expand";
+  margin-left: 5px;
+}
+
+.bslib-value-box .bslib-full-screen-enter {
+  display: none !important;
+}
+
+/* ============================================================
+   Projection table — match the interactive version's styling
+   Targets DT (datatable) output. Hex values are your brand vars:
+   #071D49 navy · #2C1E1B brown · #A6C4CA bluegray · #C6D0BE sage
+   ============================================================ */
+
+/* Title (DT caption) */
+table.dataTable caption,
+.dataTables_wrapper caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0 .35rem 0;
+  color: #071D49;
+  font-family: "UT Industry", serif;
+  font-weight: 700;
+  font-size: 1.35rem;
+}
+
+/* Header: bold text + bluegray underline, no fill */
+table.dataTable thead th {
+  background: transparent !important;
+  color: #2C1E1B;
+  font-family: "UT Industry", serif;
+  font-weight: 700;
+  border-top: none !important;
+  border-bottom: 2px solid #A6C4CA !important;
+}
+
+/* Body: roomy rows + faint sage stripe */
+table.dataTable tbody td {
+  padding: 8px 10px;
+  border-top: none;
+}
+table.dataTable.stripe tbody tr.odd,
+table.dataTable.display tbody tr.odd,
+table.dataTable tbody tr:nth-of-type(even) {
+  background-color: rgba(198, 208, 190, .25);   /* sage @ 25% */
+}
+table.dataTable tbody tr:hover {
+  background-color: rgba(166, 196, 202, .30);   /* bluegray @ 30% */
+}
+
+/* Download / CSV / Excel / Copy buttons (DT Buttons extension) */
+.dt-buttons .dt-button,
+.dt-button {
+  background: #e9eef0 !important;
+  color: #071D49 !important;
+  font-family: "Lato", sans-serif !important;
+  font-size: .78rem !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 4px 12px !important;
+  margin: 0 6px 8px 0 !important;
+  box-shadow: none !important;
+}
+.dt-buttons .dt-button:hover,
+.dt-button:hover {
+  background: #A6C4CA !important;
+  color: #2C1E1B !important;
+}
+
+/* ============================================================
+   Responsive fixes — value boxes and projection tables
+   Added for 14" laptop screens and smaller
+   ============================================================ */
+
+/* --- Value boxes: let content shrink instead of clipping --- */
+
+.bslib-value-box {
+  min-height: 0;                 /* release the fixed floor that clips text */
+  overflow: visible;
+}
+
+
+/* Title: wraps rather than being cut off */
+.bslib-value-box .value-box-title {
+  font-size: clamp(0.85rem, 1.1vw, 1.15rem);
+  line-height: 1.25;
+  margin-bottom: 0.25rem;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* The big number: scales with viewport width */
+.bslib-value-box .value-box-value {
+  font-size: clamp(1.75rem, 3vw, 3rem);
+  line-height: 1.1;
+  margin-bottom: 0.2rem;
+}
+
+.bslib-value-box .value-box-showcase > * {
+  width: clamp(28px, 3.5vw, 56px) !important;
+  height: auto !important;
+}
+
+/* Caption lines under the number ("5 years projection / 2029 Q4") */
+.bslib-value-box .value-box-area > p {
+  font-size: clamp(0.72rem, 0.85vw, 0.95rem);
+  line-height: 1.3;
+  margin: 0;
+}
+
+/* --- Value box: icon left, vertically centered with text --- */
+
+/* Match whichever wrapper this bslib version emits */
+.bslib-value-box .value-box-grid,
+.bslib-value-box > .card-body,
+.bslib-value-box .value-box-showcase-left-center {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.bslib-value-box .value-box-showcase {
+  flex: 0 0 auto !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  align-self: center !important;
+}
+
+.bslib-value-box .value-box-showcase > *,
+.bslib-value-box .value-box-showcase svg {
+  width: clamp(32px, 3vw, 48px) !important;
+  height: auto !important;
+  margin: 0 !important;
+}
+
+.bslib-value-box .value-box-area {
+  flex: 1 1 auto !important;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0 !important;
+  min-width: 0;
+}
+
+/* --- Projection tables: smaller, denser --- */
+
+table.dataTable caption,
+.dataTables_wrapper caption {
+  font-size: clamp(0.95rem, 1.2vw, 1.2rem);
+  padding: 0 0 0.25rem 0;
+}
+
+table.dataTable {
+  font-size: 0.78rem;
+}
+
+table.dataTable thead th {
+  font-size: 0.78rem;
+  padding: 6px 8px !important;
+  white-space: normal;           /* let "% Change" wrap instead of overflowing */
+}
+
+table.dataTable tbody td {
+  padding: 4px 8px;              /* was 8px 10px */
+  font-size: 0.78rem;
+}
+
+.dt-buttons .dt-button,
+.dt-button {
+  font-size: 0.7rem !important;
+  padding: 3px 9px !important;
+  margin: 0 4px 5px 0 !important;
+}
+
+/* Table card scroll area — more rows visible before scrolling */
+.dataTables_wrapper {
+  font-size: 0.78rem;
+}
+.dataTables_scrollBody {
+  max-height: none !important;
+}
+
+/* --- Tighter still on 14" and smaller --- */
+
+@media (max-width: 1600px) {
+  .bslib-value-box .value-box-value {
+    font-size: clamp(1.5rem, 2.4vw, 2.25rem);
+  }
+  .bslib-value-box .value-box-title {
+    font-size: 0.9rem;
+  }
+  table.dataTable,
+  table.dataTable thead th,
+  table.dataTable tbody td {
+    font-size: 0.72rem;
+  }
+  table.dataTable tbody td {
+    padding: 3px 6px;
+  }
+}

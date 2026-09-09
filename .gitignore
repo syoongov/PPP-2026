@@ -1,0 +1,58 @@
+# =====================================================
+# ALLOWLIST: ignore everything, then permit the deploy set.
+# Old and duplicate files stay on disk but are never tracked.
+# =====================================================
+# Ignore everything
+
+*
+# Permit directory traversal (required — without this the
+# un-ignore rules below can't reach into subfolders)
+
+!*/
+
+# --- Project config ---
+!.gitignore
+!_quarto.yml
+!manifest.json
+!renv.lock
+
+# --- Pages ---
+!index.qmd
+!dashboard-2026-final.qmd
+!reports.qmd
+
+# --- Styling ---
+!custom-june4.scss
+!fonts/**
+
+# --- Assets ---
+!images/**
+!UPPP Methodology-July-2025.pdf
+!PPP-April-Update-2025.pdf
+!Stock_Flow_Model_Example.pdf
+!Utah-Prison-Projections-Capacity-Final-Report-April-2025.pdf
+
+
+
+# --- Data ---
+!data/uppp_dashboard_quarterly.csv
+!data/uppp_dashboard_summary.csv
+!data/Drivers/*.csv
+
+# --- Re-ignore, including the old app/ project ---
+app/
+_site/
+.quarto/
+*_files/
+*_cache/
+*.xlsx
+*.xls
+.Rproj.user
+
+/.quarto/
+**/*.quarto_ipynb
+.Rhistory
+.RData
+.httr-oauth
+.DS_Store
+.quarto

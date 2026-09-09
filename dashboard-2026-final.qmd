@@ -1,0 +1,1849 @@
+---
+title: "Utah Prison Population Projections"
+subtitle: "Historical Trends and Future Projections"
+format: 
+  dashboard:
+    orientation: rows  
+    logo: images/DOCJ_WhitelogoMedium.svg
+    theme: 
+      - sandstone
+      - custom-june4.scss
+    #nav-buttons:
+     # - linkedin
+    scrolling: false
+---
+
+```{r}
+#| label: setup
+#| message: false
+#| include: false
+
+
+# Load required packages - streamlined to only what's needed for visualization
+library(tidyverse)
+library(plotly)
+library(DT)
+library(scales)
+library(bslib)
+library(bsicons)
+library(lubridate)
+library(kableExtra)
+library(knitr)
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(tsibble)
+library(ggplot2)
+library(plotly)
+library(scales)
+library(DT)
+library(forecast)
+library(htmltools)  # For tags$p function
+library(fable)
+
+# Set global options / Posit Connect Friendly options 
+# Connect-friendly options
+options(
+  scipen = 999,
+  warn = if(Sys.getenv("CONNECT_SERVER") != "") -1 else 0
+)
+
+theme_set(theme_minimal())
+
+# Define parameters that would have been selected by the user
+population_type <- "total"  # Options: "total", "male", "female"
+projection_horizon <- 20    # Options: 8, 12, 20
+scenario <- "baseline"      # Options: "baseline", "reform", "covid"
+
+# Brand fonts for plotly
+brand_title <- list(family = "UT Industry, serif", size = 20, color = "#071D49")
+brand_body  <- list(family = "UT Industry, serif", size = 13, color = "#2C1E1B")
+
+# === Capacity threshold brand colors (ADDED) =====================
+cap_col_max   <- "#9B1B15"   # Absolute Maximum  (brand red)
+cap_col_emerg <- "#A47217"   # Emergency         (brand gold)
+cap_col_oper  <- "#2C1E1B"   # Operational       (brand brown)
+
+# === Data currency stamp (ADDED) =================================
+DATA_AS_OF <- "2024 Q4"
+```
+
+```{r}
+#| label: load-preprocessed-data
+#| include: false
+
+# =================================================================
+# FORECAST DATA — tidy long file (2026 vintage)
+# date, quarter_label, year, quarter, series, kind,
+# actual, central, low, high
+#   series: Total | Male | Female
+#   kind:   actual (2010 Q1–2026 Q2) | forecast (2026 Q3–2031 Q2)
+# =================================================================
+
+uppp <- read.csv("data/uppp_dashboard_quarterly.csv",
+                 stringsAsFactors = FALSE) %>%
+  mutate(
+    date         = as.Date(date),
+    Quarter_Year = yearquarter(quarter_label),
+    across(c(actual, central, low, high), as.numeric)
+  )
+
+# --- Data currency, derived not hardcoded ----------------------
+
+ADP_AS_OF <- uppp %>%
+  filter(kind == "actual") %>%
+  pull(quarter_label) %>%
+  tail(1)                                  # "2026 Q2"
+
+HORIZON_AS_OF <- uppp %>%
+  filter(kind == "forecast") %>%
+  pull(quarter_label) %>%
+  tail(1)                                  # "2031 Q2"
+
+DATA_AS_OF    <- ADP_AS_OF
+BASE_LABEL    <- ADP_AS_OF
+HORIZON_LABEL <- HORIZON_AS_OF
+HORIZON_YEARS <- 5
+
+
+# =================================================================
+# SUMMARY METRICS
+#
+# Growth rates are READ from the published summary, not recomputed.
+# A naive CAGR anchored on the last actual quarter understates
+# female growth by ~0.4 pts, because female 2026 Q2 (462.3) sits
+# about 8 above the prior five quarters (442–454).
+#
+# pct_change is derived FROM the published annual rate so the two
+# value boxes stay internally consistent.
+# =================================================================
+
+uppp_summary    <- read.csv("data/uppp_dashboard_summary.csv",
+                            stringsAsFactors = FALSE)
+summary_central <- uppp_summary %>% filter(scenario == "central")
+
+ann_growth <- list(
+  Total  = summary_central$total_ann_growth,     # 2.11
+  Male   = summary_central$male_ann_growth,      # 2.16
+  Female = summary_central$female_ann_growth     # 1.36
+)
+
+# =================================================================
+# CAPACITY THRESHOLDS
+# Male/female are hardcoded in their own chunks; total is the sum.
+# VERIFY these against the UDOC capacity source before publishing.
+# =================================================================
+
+capacity_thresholds <- list(
+  Total  = list(absolute_max = 7326, emergency = 7180, operational = 7070),
+  Male   = list(absolute_max = 6830, emergency = 6693.4, operational = 6590.95),
+  Female = list(absolute_max =  496, emergency =  486.08, operational =  478.64)
+)
+
+series_meta <- list(
+  Total  = list(color = "#007000", title = "Total Prison Population"),
+  Male   = list(color = "#093692", title = "Male Prison Population"),
+  Female = list(color = "#9B1B15", title = "Female Prison Population")
+)
+
+# =================================================================
+# Assemble the object the Projections and Capacity chunks expect.
+# Column names (Actual / Forecasted / Lower_CI / Upper_CI /
+# Forecasted_hybrid / Percent_Change) match the pre-2026 vintage so
+# those chunks run unchanged. Quarter_Year stays a yearquarter —
+# the chunks rely on `max_date + 1`, `seq(by = 1)` and the "%q"
+# format code, all of which are tsibble behaviours.
+# =================================================================
+
+build_population_data <- function(s) {
+
+  fd <- uppp %>%
+    filter(series == s) %>%
+    arrange(date) %>%
+    transmute(
+      Quarter_Year = yearquarter(quarter_label),
+      Actual       = if_else(kind == "actual",   actual,  NA_real_),
+      Forecasted   = if_else(kind == "forecast", central, NA_real_),
+      Lower_CI     = if_else(kind == "forecast", low,     NA_real_),
+      Upper_CI     = if_else(kind == "forecast", high,    NA_real_)
+    )
+
+  td <- uppp %>%
+    filter(series == s, kind == "forecast") %>%
+    arrange(date) %>%
+    transmute(
+      Quarter_Year      = yearquarter(quarter_label),
+      Forecasted_hybrid = central,
+      Percent_Change    = round(100 * (central / lag(central) - 1), 1)
+    )
+
+  cur <- uppp %>% filter(series == s, kind == "actual")   %>%
+                  pull(actual)  %>% tail(1)
+  prj <- uppp %>% filter(series == s, kind == "forecast") %>%
+                  pull(central) %>% tail(1)
+  ann <- ann_growth[[s]]
+  cap <- capacity_thresholds[[s]]
+
+  list(
+    forecast_data = fd,
+    table_data    = td,
+    color         = series_meta[[s]]$color,
+    title         = series_meta[[s]]$title,
+
+    current_pop   = cur,
+    projected_pop = prj,
+    annual_change = ann,
+    pct_change    = round(100 * ((1 + ann / 100)^HORIZON_YEARS - 1), 1),
+
+    capacity_absolute_max = cap$absolute_max,
+    capacity_emergency    = cap$emergency,
+    capacity_operational  = cap$operational
+  )
+}
+
+metrics_total  <- build_population_data("Total")
+metrics_male   <- build_population_data("Male")
+metrics_female <- build_population_data("Female")
+
+current_total  <- metrics_total$current_pop
+current_male   <- metrics_male$current_pop
+current_female <- metrics_female$current_pop
+
+projected_total  <- metrics_total$projected_pop
+pct_change_total <- metrics_total$pct_change
+
+get_data_for_population <- function(pop) {
+  switch(tolower(gsub(" ?Population", "", pop)),
+         "male"   = metrics_male,
+         "female" = metrics_female,
+         metrics_total)
+}
+
+
+# --- Scenario bracket (for Projections page, if surfaced) ------
+
+scenario_bracket <- uppp_summary %>%
+  transmute(
+    Scenario = recode(scenario,
+                      central   = "Central (20/80)",
+                      bracket_a = "Lower (0/100)",
+                      bracket_b = "Upper (50/50)"),
+    Weight            = weight,
+    `2031 Q2 ADP`     = total_adp_5yr,
+    `Annual growth %` = total_ann_growth
+  )
+
+# =================================================================
+# DRIVER DATA — from DB_Input_v1_2026_Drivers_Plots
+# =================================================================
+
+adp_offense_type <- read.csv("data/Drivers/adp_offense_type_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(Quarter_Year))
+
+adp_offense_severity <- read.csv("data/Drivers/adp_offense_severity_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(Quarter_Year))
+
+adp_sex <- read.csv("data/Drivers/adp_sex_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(Quarter_Year))
+
+flows_quarterly <- read.csv("data/Drivers/flows_quarterly_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(quarter)) %>% select(-quarter)
+
+flows_by_type <- read.csv("data/Drivers/flows_by_offense_type_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(quarter)) %>% select(-quarter)
+
+flows_by_degree <- read.csv("data/Drivers/flows_by_offense_degree_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(quarter)) %>% select(-quarter)
+
+flows_by_type_f <- read.csv("data/Drivers/flows_by_offense_type_female_2026.csv") %>%
+  mutate(Quarter_Year = yearquarter(quarter)) %>% select(-quarter)
+
+FLOW_END <- max(flows_quarterly$Quarter_Year)
+```
+
+
+#  {.sidebar}
+
+### About
+<span style="color: #071D49">The Utah Prison Projection Project is a collaborative effort between the Utah Department of Corrections and the Commission on Criminal and Juvenile Justice. This initiative aims to develop a Utah-specific prison population forecasting tool to support criminal justice resource planning and analyze the impact of new legislation and policy on prison populations. </span>
+
+<span style="color: #565656">**This dashboard provides projections of Utah's prison population based on historical data.**</span>
+
+<span style="color: #565656">**Population Type:** Total, Male, Female </span>
+
+<span style="color: #565656">**Projection Horizon:** 5-years </span>
+
+<span style="color: #565656">**Policy Scenario:** Baseline </span>
+
+<span style="color: #565656">**Capacity Values (for 2026):** Absolute Maximum Capacity (100% threshold), Emergency Capacity (98% threshold), Operational Capacity (96.5% threshold) </span>
+
+
+<!-- ADDED: plain-language takeaway + data currency stamp -->
+<span style="color: #071D49"><b>At a glance:</b> Utah's total prison population is projected to grow `r pct_change_total`% over five years &mdash; from `r comma(round(current_total))` in `r BASE_LABEL` to about `r comma(round(projected_total))` by `r HORIZON_LABEL`. </span>
+
+<span style="color: #565656"><i>Data current as of `r DATA_AS_OF`.</i></span>
+
+
+
+# 🏛️ Overview {orientation="row"}
+
+## Value Boxes {height="30%"}
+
+```{r}
+#| label: value-boxes
+
+# Get data based on the selected population type
+data <- get_data_for_population(population_type)
+
+# Create layout with value boxes
+layout_column_wrap(
+  width = 1/4,  # exactly 4 columns; shrink together
+  fixed_width = FALSE,
+  heights_equal = "row",
+  gap = "0.75rem",
+  value_box(
+    title = paste(str_to_title(gsub("Population", "", population_type)), "Current Population"),
+    value = comma(round(data$current_pop)),
+    showcase = bs_icon("people-fill"),
+    showcase_layout = showcase_left_center(),
+    theme = value_box_theme(bg = "#A6C4CA", fg = "#2C1E1B"),
+    tags$p(BASE_LABEL)                                       # was "2024 Q4"
+  ),
+  value_box(
+    title = paste(str_to_title(gsub("Population", "", population_type)), "Projected Population"),
+    value = comma(round(data$projected_pop)),
+    showcase = bs_icon("graph-up"),
+    showcase_layout = showcase_left_center(),
+    theme = value_box_theme(bg = "#007000", fg = "#FFFFFF"),
+    tags$p(paste0("5-year projection · ", HORIZON_LABEL))   # replaces both tags$p lines
+  ),
+  value_box(
+    title = "Percent Change",
+    value = paste0(data$pct_change, "%"),
+    showcase = bs_icon("percent"),
+    showcase_layout = showcase_left_center(),
+    theme = value_box_theme(bg = "#A47217", fg = "#FFFFFF"),
+    tags$p("over 5 years")
+  ),
+  value_box(
+    title = "Average Annual Change",
+    value = paste0(data$annual_change, "%"),
+    showcase = bs_icon("calendar-event"),
+    showcase_layout = showcase_left_center(),
+    theme = value_box_theme(bg = "#9B1B15", fg = "#FFFFFF"),
+    tags$p("annually")
+  )
+)
+```
+
+## Plot: Quarterly Net Difference Prison Admissions and Releases Over Time {height="60%"}
+
+```{r}
+#| label: admissions-releases-plot
+#| title: Prison Admissions & Releases (Net Difference)
+#| height: 60%
+
+# Look up the line's value at each annotated quarter so the arrowhead
+# lands on the series rather than floating in empty space.
+val_at <- function(q) {
+  v <- flows_quarterly$net_admissions[
+    flows_quarterly$Quarter_Year == yearquarter(q)]
+  if (length(v) == 0) 0 else v[1]
+}
+
+y_jri   <- val_at("2015 Q1")
+y_covid <- val_at("2020 Q1")
+
+plot_ly(flows_quarterly, x = ~as.character(Quarter_Year)) %>%
+  add_lines(
+    y = ~net_admissions,
+    name = "Net difference",
+    line = list(color = "#093692", width = 2.5)          # brand navy
+  ) %>%
+  add_lines(
+    y = 0,
+    name = "No growth line",
+    line = list(color = "#A47217", dash = "dash", width = 2)   # brand gold
+  ) %>%
+  layout(
+    title = "",
+    font = brand_body,                      # UT Industry, #2C1E1B
+    xaxis = list(
+      title = "Year-Quarter",
+      type = "category",
+      dtick = 4,
+      zerolinecolor = "#A47217",
+      zerolinewidth = 2
+    ),
+    yaxis = list(
+      title = "Count",
+      zerolinecolor = "#A47217",
+      zerolinewidth = 2
+    ),
+    plot_bgcolor = "#f5f5f5",
+    paper_bgcolor = "#ffffff",
+    legend = list(font = brand_body)
+  ) %>%
+  # Add annotations
+  add_annotations(
+    x = "2015 Q1",
+    y = y_jri,
+    text = "JRI",
+    showarrow = TRUE,
+    arrowhead = 2,
+    arrowsize = 1,
+    arrowwidth = 2,
+    arrowcolor = "#2C1E1B",                 # brand brown
+    ax = 0,
+    ay = 40,   # label sits 40px below; arrow points up to the line
+    font = list(family = "UT Industry, serif", size = 12, color = "#071D49"),
+    bgcolor = "rgba(255, 255, 255, 0.85)",
+    bordercolor = "#2C1E1B",
+    borderwidth = 1
+  ) %>%
+  add_annotations(
+    x = "2020 Q1",
+    y = y_covid,
+    text = "COVID",
+    showarrow = TRUE,
+    arrowhead = 2,
+    arrowsize = 1,
+    arrowwidth = 2,
+    arrowcolor = "#2C1E1B",
+    ax = 0,
+    ay = 25,   # staggered vs. JRI so the labels don't collide near zero
+    font = list(family = "UT Industry, serif", size = 12, color = "#071D49"),
+    bgcolor = "rgba(255, 255, 255, 0.85)",
+    bordercolor = "#2C1E1B",
+    borderwidth = 1
+  )
+```
+
+# 📈 Projections {.tabset}
+
+## Total Population {height="275px"}
+
+### Column {width=70%}
+
+```{r}
+#| label: total-projection-plot
+
+# Get the appropriate forecast data for total population
+total_data <- get_data_for_population("total")
+forecast_data <- total_data$forecast_data
+color_actual <- total_data$color
+title <- paste(total_data$title, "Projection")
+
+# Find the transition point between actual and forecast
+actual_data <- forecast_data[!is.na(forecast_data$Actual),]
+max_date <- max(actual_data$Quarter_Year)
+
+# Get horizon dates for filtering
+horizon_dates <- seq(max_date + 1, by = 1, length.out = projection_horizon)
+
+# Create plot
+p <- plot_ly(
+  hoverlabel = list(namelength = -1)  # Don't truncate trace names in hover
+)
+
+# Add historical data
+p <- p %>% add_trace(
+  data = forecast_data[!is.na(forecast_data$Actual),],
+  x = ~Quarter_Year,
+  y = ~Actual,
+  type = 'scatter',
+  mode = 'lines',
+  name = "Historical",
+  line = list(color = "#007000"),
+  hoverinfo = "text",
+  text = ~paste0(
+    format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+    "<br>Population: ", formatC(Actual, format="d", big.mark=",")
+  )
+)
+
+# Add forecast data
+forecast_part <- forecast_data[forecast_data$Quarter_Year %in% horizon_dates,]
+
+# ADDED: 80% prediction-interval ribbon, drawn UNDER the projection line.
+# Guarded so it silently no-ops if a forecast df lacks CI columns (won't break render).
+#if (all(c("Lower_CI", "Upper_CI") %in% names(forecast_part))) {
+ # p <- p %>% add_ribbons(
+  #  data = forecast_part,
+  #  x = ~Quarter_Year,
+  # ymin = ~Lower_CI,
+  #  ymax = ~Upper_CI,
+  #  name = "Projection range",
+  #  line = list(width = 0),
+  #  fillcolor = "rgba(164, 114, 23, 0.18)",   # translucent brand gold
+  #  hoverinfo = "skip"
+  #)
+#}
+
+p <- p %>% add_trace(
+  data = forecast_part,
+  x = ~Quarter_Year,
+  y = ~Forecasted,
+  type = 'scatter',
+  mode = 'lines',
+  name = "Projection",
+  line = list(color = "#A47217", dash = "dash"),
+  hoverinfo = "text",
+  text = ~paste0(
+    format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+    "<br>Projected: ", formatC(Forecasted, format="d", big.mark=",")
+  )
+)
+
+# Get all years for x-axis ticks
+all_quarters <- unique(forecast_data$Quarter_Year)
+all_years <- unique(format(all_quarters, "%Y"))
+
+# Select every other year for x-axis ticks, using Q1 of each year
+tick_positions <- c()
+tick_labels <- c()
+
+for (i in seq(1, length(all_years), by = 2)) {
+  year <- all_years[i]
+  year_quarters <- all_quarters[format(all_quarters, "%Y") == year]
+  
+  if (length(year_quarters) > 0) {
+    # Find Q1 or closest quarter
+    months <- as.numeric(format(year_quarters, "%m"))
+    q1_idx <- which.min(abs(months - 2))  # closest to February (middle of Q1)
+    q1_date <- year_quarters[q1_idx]
+    
+    tick_positions <- c(tick_positions, q1_date)
+    tick_labels <- c(tick_labels, paste0(year, " Q", ceiling(months[q1_idx]/3)))
+  }
+}
+
+# Complete layout
+p %>% layout(
+  title = list(
+    text = title,
+    font = list(family = "UT Industry, serif", size = 20, color = "#071D49"),
+    y = 0.95,                          # nudge title down slightly from the very top
+    yanchor = "top",
+    pad = list(b = 10)                 # padding between title and plot
+  ),
+  margin = list(t = 70),               # <-- the key fix: room above the plot for the title
+  font = list(family = "UT Industry, serif"),
+  xaxis = list(
+    title = "Year-Quarter",
+    type = "date",
+    tickmode = "array",
+    tickvals = tick_positions,
+    ticktext = tick_labels,
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = "Prison Population",
+    tickformat = ","
+  ),
+  hovermode = "closest",
+  showlegend = TRUE
+)
+
+
+```
+
+### Column {width=30%}
+
+```{r}
+#| label: total-projection-table
+
+# Get the correct table data for total population
+table_data <- total_data$table_data
+
+# Limit rows to selected horizon
+table_data <- head(table_data, projection_horizon)
+
+# Format table
+table_data <- table_data %>%
+  mutate(
+    Quarter_Year = as.character(Quarter_Year),
+    Forecasted_hybrid = round(Forecasted_hybrid)
+#     Lower_CI = round(Lower_CI),
+#     Upper_CI = round(Upper_CI)
+  ) %>%
+  select(
+    Quarter = Quarter_Year,
+    Forecast = Forecasted_hybrid,
+#     `Lower CI` = Lower_CI,
+#     `Upper CI` = Upper_CI,
+    `% Change` = Percent_Change
+  )
+
+datatable(
+  table_data,
+  extensions = "Buttons",                       # ADDED: download/copy buttons
+  options = list(
+    pageLength = projection_horizon,
+    dom = 'Bt',                                 # B = buttons, t = table
+    ordering = FALSE,
+    buttons = list(
+      list(extend = "csv",   text = "CSV"),
+      list(extend = "excel", text = "Excel"),
+      list(extend = "copy",  text = "Copy")
+    )
+  ),
+  rownames = FALSE,
+  caption = "Total Population Projections"
+) %>%
+  formatStyle(
+    '% Change',
+    color = styleInterval(c(0), c('#9B1B15', '#007000')),
+    fontWeight = 'bold'
+  )
+```
+
+## Male Population {height="275px"}
+
+### Column {width=70%}
+
+```{r}
+#| label: male-projection-plot
+
+# Get the appropriate forecast data for male population
+male_data <- get_data_for_population("male")
+forecast_data <- male_data$forecast_data
+color_actual <- male_data$color
+title <- paste(male_data$title, "Projection")
+
+# Find the transition point between actual and forecast
+actual_data <- forecast_data[!is.na(forecast_data$Actual),]
+max_date <- max(actual_data$Quarter_Year)
+
+# Get horizon dates for filtering
+horizon_dates <- seq(max_date + 1, by = 1, length.out = projection_horizon)
+
+# Create plot
+p <- plot_ly(
+  hoverlabel = list(namelength = -1)  # Don't truncate trace names in hover
+)
+
+# Add historical data
+p <- p %>% add_trace(
+  data = forecast_data[!is.na(forecast_data$Actual),],
+  x = ~Quarter_Year,
+  y = ~Actual,
+  type = 'scatter',
+  mode = 'lines',
+  name = "Historical",
+  line = list(color = color_actual),
+  hoverinfo = "text",
+  text = ~paste0(
+    format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+    "<br>Population: ", formatC(Actual, format="d", big.mark=",")
+  )
+)
+
+# Add forecast data
+forecast_part <- forecast_data[forecast_data$Quarter_Year %in% horizon_dates,]
+
+# ADDED: 80% prediction-interval ribbon, drawn UNDER the projection line.
+# Guarded so it silently no-ops if a forecast df lacks CI columns (won't break render).
+#if (all(c("Lower_CI", "Upper_CI") %in% names(forecast_part))) {
+#  p <- p %>% add_ribbons(
+#    data = forecast_part,
+#    x = ~Quarter_Year,
+#    ymin = ~Lower_CI,
+#    ymax = ~Upper_CI,
+#    name = "Projection range",
+#    line = list(width = 0),
+#    fillcolor = "rgba(164, 114, 23, 0.18)",   # translucent brand gold
+#    hoverinfo = "skip"
+#  )
+#}
+
+p <- p %>% add_trace(
+  data = forecast_part,
+  x = ~Quarter_Year,
+  y = ~Forecasted,
+  type = 'scatter',
+  mode = 'lines',
+  name = "Projection",
+  line = list(color = "#A47217", dash = "dash"),
+  hoverinfo = "text",
+  text = ~paste0(
+    format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+    "<br>Projected: ", formatC(Forecasted, format="d", big.mark=",")
+  )
+)
+
+# Get all years for x-axis ticks
+all_quarters <- unique(forecast_data$Quarter_Year)
+all_years <- unique(format(all_quarters, "%Y"))
+
+# Select every other year for x-axis ticks, using Q1 of each year
+tick_positions <- c()
+tick_labels <- c()
+
+for (i in seq(1, length(all_years), by = 2)) {
+  year <- all_years[i]
+  year_quarters <- all_quarters[format(all_quarters, "%Y") == year]
+  
+  if (length(year_quarters) > 0) {
+    # Find Q1 or closest quarter
+    months <- as.numeric(format(year_quarters, "%m"))
+    q1_idx <- which.min(abs(months - 2))  # closest to February (middle of Q1)
+    q1_date <- year_quarters[q1_idx]
+    
+    tick_positions <- c(tick_positions, q1_date)
+    tick_labels <- c(tick_labels, paste0(year, " Q", ceiling(months[q1_idx]/3)))
+  }
+}
+
+# Complete layout
+p %>% layout(
+  title = list(
+    text = title,
+    font = list(family = "UT Industry, serif", size = 20, color = "#071D49"),
+    y = 0.95,                          # nudge title down slightly from the very top
+    yanchor = "top",
+    pad = list(b = 10)                 # padding between title and plot
+  ),
+  margin = list(t = 70),               # <-- the key fix: room above the plot for the title
+  font = list(family = "UT Industry, serif"),
+  xaxis = list(
+    title = "Year-Quarter",
+    type = "date",
+    tickmode = "array",
+    tickvals = tick_positions,
+    ticktext = tick_labels,
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = "Prison Population",
+    tickformat = ","
+  ),
+  hovermode = "closest",
+  showlegend = TRUE
+)
+
+```
+
+### Column {width=30%}
+
+```{r}
+#| label: male-projection-table
+
+# Get the correct table data for male population
+table_data <- male_data$table_data
+
+# Limit rows to selected horizon
+table_data <- head(table_data, projection_horizon)
+
+# Format table
+table_data <- table_data %>%
+  mutate(
+    Quarter_Year = as.character(Quarter_Year),
+    Forecasted_hybrid = round(Forecasted_hybrid)
+#     Lower_CI = round(Lower_CI),
+#     Upper_CI = round(Upper_CI)
+  ) %>%
+  select(
+    Quarter = Quarter_Year,
+    Forecast = Forecasted_hybrid,
+#     `Lower CI` = Lower_CI,
+#     `Upper CI` = Upper_CI,
+    `% Change` = Percent_Change
+  )
+
+datatable(
+  table_data,
+  extensions = "Buttons",                       # ADDED: download/copy buttons
+  options = list(
+    pageLength = projection_horizon,
+    dom = 'Bt',                                 # B = buttons, t = table
+    ordering = FALSE,
+    buttons = list(
+      list(extend = "csv",   text = "CSV"),
+      list(extend = "excel", text = "Excel"),
+      list(extend = "copy",  text = "Copy")
+    )
+  ),
+  rownames = FALSE,
+  caption = "Male Population Projections"
+) %>%
+  formatStyle(
+    '% Change',
+    color = styleInterval(c(0), c('#9B1B15', '#007000')),
+    fontWeight = 'bold'
+  )
+```
+
+## Female Population {height="275px"}
+
+### Column {width=70%}
+
+```{r}
+#| label: female-projection-plot
+
+# Get the appropriate forecast data for female population
+female_data <- get_data_for_population("female")
+forecast_data <- female_data$forecast_data
+color_actual <- female_data$color
+title <- paste(female_data$title, "Projection")
+
+# Find the transition point between actual and forecast
+actual_data <- forecast_data[!is.na(forecast_data$Actual),]
+max_date <- max(actual_data$Quarter_Year)
+
+# Get horizon dates for filtering
+horizon_dates <- seq(max_date + 1, by = 1, length.out = projection_horizon)
+
+# Create plot
+p <- plot_ly(
+  hoverlabel = list(namelength = -1)  # Don't truncate trace names in hover
+)
+
+# Add historical data
+p <- p %>% add_trace(
+  data = forecast_data[!is.na(forecast_data$Actual),],
+  x = ~Quarter_Year,
+  y = ~Actual,
+  type = 'scatter',
+  mode = 'lines',
+  name = "Historical",
+  line = list(color = color_actual),
+  hoverinfo = "text",
+  text = ~paste0(
+    format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+    "<br>Population: ", formatC(Actual, format="d", big.mark=",")
+  )
+)
+
+# Add forecast data
+forecast_part <- forecast_data[forecast_data$Quarter_Year %in% horizon_dates,]
+
+# ADDED: 80% prediction-interval ribbon, drawn UNDER the projection line.
+# Guarded so it silently no-ops if a forecast df lacks CI columns (won't break render).
+#if (all(c("Lower_CI", "Upper_CI") %in% names(forecast_part))) {
+#  p <- p %>% add_ribbons(
+#    data = forecast_part,
+#    x = ~Quarter_Year,
+#    ymin = ~Lower_CI,
+#    ymax = ~Upper_CI,
+#    name = "Projection range",
+#    line = list(width = 0),
+#    fillcolor = "rgba(164, 114, 23, 0.18)",   # translucent brand gold
+#    hoverinfo = "skip"
+#  )
+#}
+
+p <- p %>% add_trace(
+  data = forecast_part,
+  x = ~Quarter_Year,
+  y = ~Forecasted,
+  type = 'scatter',
+  mode = 'lines',
+  name = "Projection",
+  line = list(color = "#A47217", dash = "dash"),
+  hoverinfo = "text",
+  text = ~paste0(
+    format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+    "<br>Projected: ", formatC(Forecasted, format="d", big.mark=",")
+  )
+)
+
+# Get all years for x-axis ticks
+all_quarters <- unique(forecast_data$Quarter_Year)
+all_years <- unique(format(all_quarters, "%Y"))
+
+# Select every other year for x-axis ticks, using Q1 of each year
+tick_positions <- c()
+tick_labels <- c()
+
+for (i in seq(1, length(all_years), by = 2)) {
+  year <- all_years[i]
+  year_quarters <- all_quarters[format(all_quarters, "%Y") == year]
+  
+  if (length(year_quarters) > 0) {
+    # Find Q1 or closest quarter
+    months <- as.numeric(format(year_quarters, "%m"))
+    q1_idx <- which.min(abs(months - 2))  # closest to February (middle of Q1)
+    q1_date <- year_quarters[q1_idx]
+    
+    tick_positions <- c(tick_positions, q1_date)
+    tick_labels <- c(tick_labels, paste0(year, " Q", ceiling(months[q1_idx]/3)))
+  }
+}
+
+# Complete layout
+p %>% layout(
+  title = list(
+    text = title,
+    font = list(family = "UT Industry, serif", size = 20, color = "#071D49"),
+    y = 0.95,                          # nudge title down slightly from the very top
+    yanchor = "top",
+    pad = list(b = 10)                 # padding between title and plot
+  ),
+  margin = list(t = 70),               # <-- the key fix: room above the plot for the title
+  font = list(family = "UT Industry, serif"),
+  xaxis = list(
+    title = "Year-Quarter",
+    type = "date",
+    tickmode = "array",
+    tickvals = tick_positions,
+    ticktext = tick_labels,
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = "Prison Population",
+    tickformat = ","
+  ),
+  hovermode = "closest",
+  showlegend = TRUE
+)
+```
+
+### Column {width=30%}
+
+```{r}
+#| label: female-projection-table
+
+# Get the correct table data for female population
+table_data <- female_data$table_data
+
+# Limit rows to selected horizon
+table_data <- head(table_data, projection_horizon)
+
+# Format table
+table_data <- table_data %>%
+  mutate(
+    Quarter_Year = as.character(Quarter_Year),
+    Forecasted_hybrid = round(Forecasted_hybrid)
+#    Lower_CI = round(Lower_CI),
+#    Upper_CI = round(Upper_CI)
+  ) %>%
+  select(
+    Quarter = Quarter_Year,
+    Forecast = Forecasted_hybrid,
+#     `Lower CI` = Lower_CI,
+#     `Upper CI` = Upper_CI,
+    `% Change` = Percent_Change
+  )
+
+datatable(
+  table_data,
+  extensions = "Buttons",                       # ADDED: download/copy buttons
+  options = list(
+    pageLength = projection_horizon,
+    dom = 'Bt',                                 # B = buttons, t = table
+    ordering = FALSE,
+    buttons = list(
+      list(extend = "csv",   text = "CSV"),
+      list(extend = "excel", text = "Excel"),
+      list(extend = "copy",  text = "Copy")
+    )
+  ),
+  rownames = FALSE,
+  caption = "Female Population Projections"
+) %>%
+  formatStyle(
+    '% Change',
+    color = styleInterval(c(0), c('#9B1B15', '#007000')),  # brand red below 0, brand green at/above 0
+    fontWeight = 'bold'
+  )
+```
+
+
+
+# ↕️️ Trends
+
+::: panel-tabset
+### Primary Offense Type
+```{r}
+#| label: trend-offense-type
+#| height: 800
+
+p <- ggplot(
+  adp_offense_type,
+  aes(
+    x = Quarter_Year,
+    y = Count,
+    group = 1,
+    text = paste(
+      "Offense Type:", Category,
+      "<br>Quarter:", Quarter_Year,
+      "<br>ADP:", round(Count, 0)
+    )
+  )
+) +
+  geom_line(
+    linewidth = 1,
+    color = "#093692"
+  ) +
+  geom_vline(
+    xintercept = yearquarter("2020 Q1"),
+    linetype = "dashed",
+    color = "#C6D0BE"
+  ) +
+  facet_wrap(
+    ~Category,
+    ncol = 3,
+  ) +
+  labs(
+    title = "Utah Prison Population by Primary Offense Type",
+    x = "Year Quarter",
+    y = "Average Daily Population"
+  ) +
+ theme_minimal() +
+  theme(
+    plot.title    = element_text(face = "bold", size = 16, color = "#071D49",
+                                 margin = margin(b = 15)),
+    axis.title.x  = element_text(size = 11, color = "#2C1E1B",
+                                 margin = margin(t = 20)),   # space above "Year Quarter"
+    axis.title.y  = element_text(size = 11, color = "#2C1E1B",
+                                 margin = margin(r = 15)),
+    strip.text    = element_text(face = "bold", size = 9, color = "#071D49",
+                                 margin = margin(b = 8)),    # space below panel titles
+    axis.text.x   = element_text(angle = 45, hjust = 1, size = 8, color = "#2C1E1B",
+                                 margin = margin(t = 5)),
+    axis.text.y   = element_text(size = 8, color = "#2C1E1B"),
+    panel.spacing.x = unit(1.5, "lines"),   # horizontal gap between panels
+    panel.spacing.y = unit(2, "lines"),     # vertical gap between panel rows
+    plot.margin   = margin(t = 10, r = 15, b = 20, l = 10)
+  )
+
+ggplotly(p, tooltip = "text") %>%
+  layout(
+    font = list(family = "UT Industry, serif"),
+    margin = list(b = 90, t = 60, l = 70, r = 30)
+  )
+```
+
+### Offense Severity
+```{r}
+#| label: trend-offense-severity
+#| height: 700
+
+# Felony degrees only. MA, S, and "No Active Offense" are near-zero
+# flat lines that add panels without signal. MB excluded upstream.
+sev_keep <- adp_offense_severity %>%
+  filter(!Category %in% c("MA", "S", "No Active Offense")) %>%
+  mutate(Category = recode(Category,
+    "F1" = "F1 — First degree felony",
+    "F2" = "F2 — Second degree felony",
+    "F3" = "F3 — Third degree felony",
+    "FC" = "FC — Capital felony"
+  ))
+
+p <- ggplot(
+  sev_keep,
+  aes(
+    x = Quarter_Year,
+    y = Count,
+    group = 1,
+    text = paste(
+      "Severity:", Category,
+      "<br>Quarter:", Quarter_Year,
+      "<br>ADP:", round(Count, 0)
+    )
+  )
+) +
+  geom_line(
+    linewidth = 1,
+    color = "#007000"
+  ) +
+  geom_vline(
+    xintercept = yearquarter("2020 Q1"),
+    linetype = "dashed",
+    color = "#C6D0BE"
+  ) +
+  facet_wrap(
+    ~Category,
+    ncol = 2
+  ) +
+  labs(
+    title = "Utah Prison Population by Offense Severity",
+    x = "Year Quarter",
+    y = "Average Daily Population"
+  ) +
+theme_minimal() +
+  theme(
+    plot.title    = element_text(face = "bold", size = 16, color = "#071D49",
+                                 margin = margin(b = 15)),
+    axis.title.x  = element_text(size = 11, color = "#2C1E1B",
+                                 margin = margin(t = 20)),   # space above "Year Quarter"
+    axis.title.y  = element_text(size = 11, color = "#2C1E1B",
+                                 margin = margin(r = 15)),
+    strip.text    = element_text(face = "bold", size = 9, color = "#071D49",
+                                 margin = margin(b = 8)),    # space below panel titles
+    axis.text.x   = element_text(angle = 45, hjust = 1, size = 8, color = "#2C1E1B",
+                                 margin = margin(t = 5)),
+    axis.text.y   = element_text(size = 8, color = "#2C1E1B"),
+    panel.spacing.x = unit(1.5, "lines"),   # horizontal gap between panels
+    panel.spacing.y = unit(2, "lines"),     # vertical gap between panel rows
+    plot.margin   = margin(t = 10, r = 15, b = 20, l = 10)
+  )
+
+ggplotly(p, tooltip = "text") %>%
+  layout(
+    font = list(family = "UT Industry, serif"),
+    margin = list(b = 90, t = 60, l = 70, r = 30)
+  )
+```
+
+### Net Admissions by Offense Degree
+```{r}
+#| label: trend-net-adm-degree
+#| height: 600
+
+# Full labels on the strips, so the codes are defined on the panel
+# itself rather than in a legend. (A color legend can't be used here —
+# mapping color to the facet variable breaks ggplotly's panel/trace
+# assignment.)
+deg_labeled <- flows_by_degree %>%
+  mutate(primary_ofnse_degree = recode(primary_ofnse_degree,
+    "F1" = "F1 — First degree felony",
+    "F2" = "F2 — Second degree felony",
+    "F3" = "F3 — Third degree felony",
+    "FC" = "FC — Capital felony"
+  ))
+
+p <- ggplot(
+  deg_labeled,
+  aes(
+    x = Quarter_Year,
+    y = net_admissions,
+    group = 1,
+    text = paste(
+      "Offense Degree:", primary_ofnse_degree,
+      "<br>Quarter:", Quarter_Year,
+      "<br>Net Admissions:", net_admissions,
+      "<br>Admissions:", admissions,
+      "<br>Releases:", releases
+    )
+  )
+) +
+  geom_line(
+    linewidth = 1,
+    color = "#007000"
+  ) +
+  geom_hline(
+    yintercept = 0,
+    color = "#A47217",
+    linetype = "dashed"
+  ) +
+  facet_wrap(
+    ~primary_ofnse_degree,
+    ncol = 2,
+    scales = "free_y"
+  ) +
+  labs(
+    title = "Net Admissions by Primary Offense Degree",
+    x = "Year Quarter",
+    y = "Net Admissions"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title    = element_text(face = "bold", size = 16, color = "#071D49",
+                                 margin = margin(b = 15)),
+    axis.title.x  = element_text(size = 11, color = "#2C1E1B",
+                                 margin = margin(t = 20)),
+    axis.title.y  = element_text(size = 11, color = "#2C1E1B",
+                                 margin = margin(r = 15)),
+    strip.text    = element_text(face = "bold", size = 9, color = "#071D49",
+                                 margin = margin(b = 8)),
+    axis.text.x   = element_text(angle = 45, hjust = 1, size = 8, color = "#2C1E1B",
+                                 margin = margin(t = 5)),
+    axis.text.y   = element_text(size = 8, color = "#2C1E1B"),
+    panel.spacing.x = unit(1.5, "lines"),
+    panel.spacing.y = unit(2, "lines"),
+    plot.margin   = margin(t = 10, r = 15, b = 20, l = 10)
+  )
+
+ggplotly(p, tooltip = "text") %>%
+  layout(
+    font = list(family = "UT Industry, serif"),
+    margin = list(b = 90, t = 60, l = 70, r = 30)
+  )
+```
+::: 
+
+
+# ⚠️ Capacity {.tabset}
+
+## Total Population {height="420px"}
+
+```{r}
+#| label: total-capacity-analysis
+
+# Get the appropriate forecast data for total population
+total_data <- get_data_for_population("total")
+forecast_data <- total_data$forecast_data
+color_actual <- total_data$color
+title <- paste(total_data$title, "vs. Capacity")
+
+# Get the capacity values directly from the function return values
+absolute_max_capacity <- total_data$capacity_absolute_max
+emergency_capacity <- total_data$capacity_emergency
+operational_capacity <- total_data$capacity_operational
+
+# Find the transition point between actual and forecast
+actual_data <- forecast_data[!is.na(forecast_data$Actual),]
+max_date <- max(actual_data$Quarter_Year)
+
+# Get horizon dates for filtering
+horizon_dates <- seq(max_date + 1, by = 1, length.out = projection_horizon)
+
+# Create capacity dataframe with all three capacity types
+capacity_df <- data.frame(
+  Quarter_Year = rep(unique(forecast_data$Quarter_Year), 3),
+  Capacity = c(
+    rep(absolute_max_capacity, length(unique(forecast_data$Quarter_Year))),
+    rep(emergency_capacity, length(unique(forecast_data$Quarter_Year))),
+    rep(operational_capacity, length(unique(forecast_data$Quarter_Year)))
+  ),
+  Type = c(
+    rep("Absolute Maximum Capacity", length(unique(forecast_data$Quarter_Year))),
+    rep("Emergency Capacity", length(unique(forecast_data$Quarter_Year))),
+    rep("Operational Capacity", length(unique(forecast_data$Quarter_Year)))
+  )
+)
+
+# Calculate when each capacity is reached
+capacity_reached <- list(
+  absolute_max = NA,
+  emergency = NA,
+  operational = NA
+)
+
+for (i in 1:length(horizon_dates)) {
+  date <- horizon_dates[i]
+  projected_value <- forecast_data$Forecasted[forecast_data$Quarter_Year == date]
+
+  if (!is.na(projected_value)) {
+    if (is.na(capacity_reached$absolute_max) && projected_value > absolute_max_capacity) {
+      capacity_reached$absolute_max <- date
+    }
+    if (is.na(capacity_reached$emergency) && projected_value > emergency_capacity) {
+      capacity_reached$emergency <- date
+    }
+    if (is.na(capacity_reached$operational) && projected_value > operational_capacity) {
+      capacity_reached$operational <- date
+    }
+  }
+}
+
+# Create plot
+p <- plot_ly(
+  hoverlabel = list(namelength = -1)
+) %>%
+  add_trace(
+    data = forecast_data[!is.na(forecast_data$Actual),],
+    x = ~Quarter_Year,
+    y = ~Actual,
+    type = 'scatter',
+    mode = 'lines',
+    name = "Historical",
+    line = list(color = "#007000"),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Population: ", formatC(Actual, format="d", big.mark=",")
+    )
+  )
+
+forecast_part <- forecast_data[forecast_data$Quarter_Year %in% horizon_dates,]
+p <- p %>%
+  add_trace(
+    data = forecast_part,
+    x = ~Quarter_Year,
+    y = ~Forecasted,
+    type = 'scatter',
+    mode = 'lines',
+    name = "Projection",
+    line = list(color = "#A47217", dash = "dash"),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Projected: ", formatC(Forecasted, format="d", big.mark=",")
+    )
+  )
+
+# Capacity threshold lines
+p <- p %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Absolute Maximum Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Absolute Maximum Capacity",
+    line = list(color = cap_col_max, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Absolute Maximum Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  ) %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Emergency Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Emergency Capacity",
+    line = list(color = cap_col_emerg, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Emergency Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  ) %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Operational Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Operational Capacity",
+    line = list(color = cap_col_oper, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Operational Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  )
+
+# Threshold-crossing annotations, staggered on both axes so the three
+# arrows (which converge within ~2 years) don't overlap.
+for (capacity_type in names(capacity_reached)) {
+  date <- capacity_reached[[capacity_type]]
+  if (!is.na(date)) {
+    projected_value <- forecast_data$Forecasted[forecast_data$Quarter_Year == date]
+
+    year <- format(date, "%Y")
+    quarter <- paste0("Q", ceiling(as.numeric(format(date, "%m"))/3))
+    quarter_label <- paste0(year, " ", quarter)
+
+    capacity_name <- switch(capacity_type,
+                            "absolute_max" = "Absolute Maximum Capacity",
+                            "emergency"    = "Emergency Capacity",
+                            "operational"  = "Operational Capacity")
+
+    annotation_color <- switch(capacity_type,
+                               "absolute_max" = cap_col_max,
+                               "emergency"    = cap_col_emerg,
+                               "operational"  = cap_col_oper)
+
+    p <- p %>%
+      add_annotations(
+        x = date,
+        y = projected_value,
+        text = paste(quarter_label),
+        showarrow = TRUE,
+        arrowhead = 2,
+        arrowsize = 1,
+        arrowwidth = 1.5,
+        arrowcolor = annotation_color,
+        ax = switch(capacity_type,
+                    "absolute_max" =  70,
+                    "emergency"    = -80,
+                    "operational"  = -80),
+        ay = switch(capacity_type,
+                    "absolute_max" = -70,
+                    "emergency"    = -35,
+                    "operational"  =  45),
+        font = list(color = annotation_color, size = 11,
+                    family = "UT Industry, serif"),
+        bgcolor = "rgba(255, 255, 255, 0.88)",
+        bordercolor = annotation_color,
+        borderwidth = 1,
+        borderpad = 4,
+        align = "center"
+      )
+  }
+}
+
+all_quarters <- unique(forecast_data$Quarter_Year)
+
+y_top <- max(c(absolute_max_capacity, forecast_data$Forecasted, forecast_data$Actual),
+             na.rm = TRUE) * 1.03
+
+p %>% layout(
+  title = list(
+    text = title,
+    font = list(family = "UT Industry, serif", size = 18, color = "#071D49"),
+    y = 0.96,
+    yanchor = "top"
+  ),
+  margin = list(t = 60, b = 50, l = 70, r = 30),
+  font = list(family = "UT Industry, serif", size = 11),
+  showlegend = TRUE,
+  shapes = list(list(
+    type = "rect", xref = "paper", yref = "y",
+    x0 = 0, x1 = 1, y0 = operational_capacity, y1 = y_top,
+    fillcolor = "rgba(155, 27, 21, 0.07)",
+    line = list(width = 0), layer = "below"
+  )),
+  xaxis = list(
+    title = "Year-Quarter",
+    type = "date",
+    tickmode = "array",
+    tickvals = all_quarters[seq(1, length(all_quarters), by = 8)],
+    ticktext = format(all_quarters[seq(1, length(all_quarters), by = 8)], "%Y"),
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = "Prison Population",
+    tickformat = ",",
+    range = c(5000, 7600)      # shared with the male chart for comparability
+  ),
+  hovermode = "closest"
+)
+```
+
+## Male Population {height="420px"}
+
+```{r}
+#| label: male-capacity-analysis
+
+male_data <- get_data_for_population("male")
+forecast_data <- male_data$forecast_data
+color_actual <- male_data$color
+title <- paste(male_data$title, "vs. Capacity")
+
+absolute_max_capacity <- 6588  # Male-specific absolute maximum capacity
+emergency_capacity <- 6456     # VERIFY against UDC source
+operational_capacity <- 6357   # VERIFY against UDC source
+
+actual_data <- forecast_data[!is.na(forecast_data$Actual),]
+max_date <- max(actual_data$Quarter_Year)
+
+horizon_dates <- seq(max_date + 1, by = 1, length.out = projection_horizon)
+
+capacity_df <- data.frame(
+  Quarter_Year = rep(unique(forecast_data$Quarter_Year), 3),
+  Capacity = c(
+    rep(absolute_max_capacity, length(unique(forecast_data$Quarter_Year))),
+    rep(emergency_capacity, length(unique(forecast_data$Quarter_Year))),
+    rep(operational_capacity, length(unique(forecast_data$Quarter_Year)))
+  ),
+  Type = c(
+    rep("Absolute Maximum Capacity", length(unique(forecast_data$Quarter_Year))),
+    rep("Emergency Capacity", length(unique(forecast_data$Quarter_Year))),
+    rep("Operational Capacity", length(unique(forecast_data$Quarter_Year)))
+  )
+)
+
+capacity_reached <- list(
+  absolute_max = NA,
+  emergency = NA,
+  operational = NA
+)
+
+for (i in 1:length(horizon_dates)) {
+  date <- horizon_dates[i]
+  projected_value <- forecast_data$Forecasted[forecast_data$Quarter_Year == date]
+
+  if (!is.na(projected_value)) {
+    if (is.na(capacity_reached$absolute_max) && projected_value > absolute_max_capacity) {
+      capacity_reached$absolute_max <- date
+    }
+    if (is.na(capacity_reached$emergency) && projected_value > emergency_capacity) {
+      capacity_reached$emergency <- date
+    }
+    if (is.na(capacity_reached$operational) && projected_value > operational_capacity) {
+      capacity_reached$operational <- date
+    }
+  }
+}
+
+p <- plot_ly(
+  hoverlabel = list(namelength = -1)
+) %>%
+  add_trace(
+    data = forecast_data[!is.na(forecast_data$Actual),],
+    x = ~Quarter_Year,
+    y = ~Actual,
+    type = 'scatter',
+    mode = 'lines',
+    name = "Historical",
+    line = list(color = color_actual),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Population: ", formatC(Actual, format="d", big.mark=",")
+    )
+  )
+
+forecast_part <- forecast_data[forecast_data$Quarter_Year %in% horizon_dates,]
+p <- p %>%
+  add_trace(
+    data = forecast_part,
+    x = ~Quarter_Year,
+    y = ~Forecasted,
+    type = 'scatter',
+    mode = 'lines',
+    name = "Projection",
+    line = list(color = "#A47217", dash = "dash"),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Projected: ", formatC(Forecasted, format="d", big.mark=",")
+    )
+  )
+
+p <- p %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Absolute Maximum Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Absolute Maximum Capacity",
+    line = list(color = cap_col_max, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Absolute Maximum Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  ) %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Emergency Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Emergency Capacity",
+    line = list(color = cap_col_emerg, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Emergency Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  ) %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Operational Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Operational Capacity",
+    line = list(color = cap_col_oper, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Operational Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  )
+
+for (capacity_type in names(capacity_reached)) {
+  date <- capacity_reached[[capacity_type]]
+  if (!is.na(date)) {
+    projected_value <- forecast_data$Forecasted[forecast_data$Quarter_Year == date]
+
+    year <- format(date, "%Y")
+    quarter <- paste0("Q", ceiling(as.numeric(format(date, "%m"))/3))
+    quarter_label <- paste0(year, " ", quarter)
+
+    capacity_name <- switch(capacity_type,
+                            "absolute_max" = "Absolute Maximum Capacity",
+                            "emergency"    = "Emergency Capacity",
+                            "operational"  = "Operational Capacity")
+
+    annotation_color <- switch(capacity_type,
+                               "absolute_max" = cap_col_max,
+                               "emergency"    = cap_col_emerg,
+                               "operational"  = cap_col_oper)
+
+    p <- p %>%
+      add_annotations(
+        x = date,
+        y = projected_value,
+        text = paste(quarter_label),
+        showarrow = TRUE,
+        arrowhead = 2,
+        arrowsize = 1,
+        arrowwidth = 1.5,
+        arrowcolor = annotation_color,
+        ax = switch(capacity_type,
+                    "absolute_max" =  70,
+                    "emergency"    = -80,
+                    "operational"  = -80),
+        ay = switch(capacity_type,
+                    "absolute_max" = -70,
+                    "emergency"    = -35,
+                    "operational"  =  45),
+        font = list(color = annotation_color, size = 11,
+                    family = "UT Industry, serif"),
+        bgcolor = "rgba(255, 255, 255, 0.88)",
+        bordercolor = annotation_color,
+        borderwidth = 1,
+        borderpad = 4,
+        align = "center"
+      )
+  }
+}
+
+all_quarters <- unique(forecast_data$Quarter_Year)
+
+y_top <- max(c(absolute_max_capacity, forecast_data$Forecasted, forecast_data$Actual),
+             na.rm = TRUE) * 1.03
+
+p %>% layout(
+  title = list(
+    text = title,
+    font = list(family = "UT Industry, serif", size = 18, color = "#071D49"),
+    y = 0.96,
+    yanchor = "top"
+  ),
+  margin = list(t = 60, b = 50, l = 70, r = 30),
+  font = list(family = "UT Industry, serif", size = 11),
+  showlegend = TRUE,
+  shapes = list(list(
+    type = "rect", xref = "paper", yref = "y",
+    x0 = 0, x1 = 1, y0 = operational_capacity, y1 = y_top,
+    fillcolor = "rgba(155, 27, 21, 0.07)",
+    line = list(width = 0), layer = "below"
+  )),
+  xaxis = list(
+    title = "Year-Quarter",
+    type = "date",
+    tickmode = "array",
+    tickvals = all_quarters[seq(1, length(all_quarters), by = 8)],
+    ticktext = format(all_quarters[seq(1, length(all_quarters), by = 8)], "%Y"),
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = "Prison Population",
+    tickformat = ",",
+    range = c(5000, 7600)      # shared with the total chart for comparability
+  ),
+  hovermode = "closest"
+)
+```
+
+## Female Population {height="420px"}
+
+```{r}
+#| label: female-capacity-analysis
+
+female_data <- get_data_for_population("female")
+forecast_data <- female_data$forecast_data
+color_actual <- female_data$color
+title <- paste(female_data$title, "vs. Capacity")
+
+absolute_max_capacity <- 632   # Female-specific absolute maximum capacity
+emergency_capacity <- 619      # VERIFY against UDC source
+operational_capacity <- 610    # VERIFY against UDC source
+
+actual_data <- forecast_data[!is.na(forecast_data$Actual),]
+max_date <- max(actual_data$Quarter_Year)
+
+horizon_dates <- seq(max_date + 1, by = 1, length.out = projection_horizon)
+
+capacity_df <- data.frame(
+  Quarter_Year = rep(unique(forecast_data$Quarter_Year), 3),
+  Capacity = c(
+    rep(absolute_max_capacity, length(unique(forecast_data$Quarter_Year))),
+    rep(emergency_capacity, length(unique(forecast_data$Quarter_Year))),
+    rep(operational_capacity, length(unique(forecast_data$Quarter_Year)))
+  ),
+  Type = c(
+    rep("Absolute Maximum Capacity", length(unique(forecast_data$Quarter_Year))),
+    rep("Emergency Capacity", length(unique(forecast_data$Quarter_Year))),
+    rep("Operational Capacity", length(unique(forecast_data$Quarter_Year)))
+  )
+)
+
+capacity_reached <- list(
+  absolute_max = NA,
+  emergency = NA,
+  operational = NA
+)
+
+for (i in 1:length(horizon_dates)) {
+  date <- horizon_dates[i]
+  projected_value <- forecast_data$Forecasted[forecast_data$Quarter_Year == date]
+
+  if (!is.na(projected_value)) {
+    if (is.na(capacity_reached$absolute_max) && projected_value > absolute_max_capacity) {
+      capacity_reached$absolute_max <- date
+    }
+    if (is.na(capacity_reached$emergency) && projected_value > emergency_capacity) {
+      capacity_reached$emergency <- date
+    }
+    if (is.na(capacity_reached$operational) && projected_value > operational_capacity) {
+      capacity_reached$operational <- date
+    }
+  }
+}
+
+p <- plot_ly(
+  hoverlabel = list(namelength = -1)
+) %>%
+  add_trace(
+    data = forecast_data[!is.na(forecast_data$Actual),],
+    x = ~Quarter_Year,
+    y = ~Actual,
+    type = 'scatter',
+    mode = 'lines',
+    name = "Historical",
+    line = list(color = color_actual),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Population: ", formatC(Actual, format="d", big.mark=",")
+    )
+  )
+
+forecast_part <- forecast_data[forecast_data$Quarter_Year %in% horizon_dates,]
+p <- p %>%
+  add_trace(
+    data = forecast_part,
+    x = ~Quarter_Year,
+    y = ~Forecasted,
+    type = 'scatter',
+    mode = 'lines',
+    name = "Projection",
+    line = list(color = "#A47217", dash = "dash"),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Projected: ", formatC(Forecasted, format="d", big.mark=",")
+    )
+  )
+
+p <- p %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Absolute Maximum Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Absolute Maximum Capacity",
+    line = list(color = cap_col_max, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Absolute Maximum Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  ) %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Emergency Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Emergency Capacity",
+    line = list(color = cap_col_emerg, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Emergency Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  ) %>%
+  add_trace(
+    data = capacity_df[capacity_df$Type == "Operational Capacity",],
+    x = ~Quarter_Year, y = ~Capacity,
+    type = 'scatter', mode = 'lines',
+    name = "Operational Capacity",
+    line = list(color = cap_col_oper, dash = "dot", width = 2),
+    hoverinfo = "text",
+    text = ~paste0(
+      format(Quarter_Year, "%Y Q"), ceiling(as.numeric(format(Quarter_Year, "%m"))/3),
+      "<br>Operational Capacity: ", formatC(Capacity, format="d", big.mark=",")
+    )
+  )
+
+for (capacity_type in names(capacity_reached)) {
+  date <- capacity_reached[[capacity_type]]
+  if (!is.na(date)) {
+    projected_value <- forecast_data$Forecasted[forecast_data$Quarter_Year == date]
+
+    year <- format(date, "%Y")
+    quarter <- paste0("Q", ceiling(as.numeric(format(date, "%m"))/3))
+    quarter_label <- paste0(year, " ", quarter)
+
+    capacity_name <- switch(capacity_type,
+                            "absolute_max" = "Absolute Maximum Capacity",
+                            "emergency"    = "Emergency Capacity",
+                            "operational"  = "Operational Capacity")
+
+    annotation_color <- switch(capacity_type,
+                               "absolute_max" = cap_col_max,
+                               "emergency"    = cap_col_emerg,
+                               "operational"  = cap_col_oper)
+
+    p <- p %>%
+      add_annotations(
+        x = date,
+        y = projected_value,
+        text = paste(quarter_label),
+        showarrow = TRUE,
+        arrowhead = 2,
+        arrowsize = 1,
+        arrowwidth = 1.5,
+        arrowcolor = annotation_color,
+        ax = switch(capacity_type,
+                    "absolute_max" =  70,
+                    "emergency"    = -80,
+                    "operational"  = -80),
+        ay = switch(capacity_type,
+                    "absolute_max" = -70,
+                    "emergency"    = -35,
+                    "operational"  =  45),
+        font = list(color = annotation_color, size = 11,
+                    family = "UT Industry, serif"),
+        bgcolor = "rgba(255, 255, 255, 0.88)",
+        bordercolor = annotation_color,
+        borderwidth = 1,
+        borderpad = 4,
+        align = "center"
+      )
+  }
+}
+
+all_quarters <- unique(forecast_data$Quarter_Year)
+
+y_top <- max(c(absolute_max_capacity, forecast_data$Forecasted, forecast_data$Actual),
+             na.rm = TRUE) * 1.03
+
+p %>% layout(
+  title = list(
+    text = title,
+    font = list(family = "UT Industry, serif", size = 18, color = "#071D49"),
+    y = 0.96,
+    yanchor = "top"
+  ),
+  margin = list(t = 60, b = 50, l = 70, r = 30),
+  font = list(family = "UT Industry, serif", size = 11),
+  showlegend = TRUE,
+  shapes = list(list(
+    type = "rect", xref = "paper", yref = "y",
+    x0 = 0, x1 = 1, y0 = operational_capacity, y1 = y_top,
+    fillcolor = "rgba(155, 27, 21, 0.07)",
+    line = list(width = 0), layer = "below"
+  )),
+  xaxis = list(
+    title = "Year-Quarter",
+    type = "date",
+    tickmode = "array",
+    tickvals = all_quarters[seq(1, length(all_quarters), by = 8)],
+    ticktext = format(all_quarters[seq(1, length(all_quarters), by = 8)], "%Y"),
+    tickangle = 0
+  ),
+  yaxis = list(
+    title = "Prison Population",
+    tickformat = ",",
+    range = c(350, 700)        # own scale — female never approaches the male range
+  ),
+  hovermode = "closest"
+)
+```
+
+
+# 📝 Methodology
+
+## Row
+
+```{r}
+#| label: pdf-embed
+#| echo: false
+
+# Title + PDF emitted as ONE block so the card doesn't space them apart.
+htmltools::tagList(
+  htmltools::tags$h3(
+    "Prison Population Projection Methodology",
+    style = "color:#071D49; font-family:'UT Industry', serif; font-weight:700; margin:0 0 0.85rem 0;"
+  ),
+  htmltools::tags$iframe(
+    src = "UPPP Methodology-July 2025.pdf",
+    width = "100%",
+    height = "100%",
+    style = "border:1px solid #ddd; display:block; min-height:72vh;"
+  )
+)
+```
+
+

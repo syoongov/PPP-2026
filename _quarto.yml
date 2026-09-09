@@ -1,0 +1,33 @@
+project:
+  type: website
+  output-dir: _site
+  render:
+    - index.qmd
+    - dashboard-2026-final.qmd
+    - reports.qmd
+  resources:
+    - fonts/
+
+website:
+  title: "Utah Prison Population Projections"
+  navbar:
+    left:
+      - text: "About"
+        file: index.qmd
+      - text: "Dashboard"
+        file: dashboard-2026-final.qmd
+      - text: "Research"
+        file: reports.qmd
+    right:
+      - icon: house
+        href: https://justice.utah.gov/research/research-and-analysis/utah-prison-projections-project/
+      - icon: linkedin
+        href: https://www.linkedin.com/sharing/share-offsite/?url=
+        aria-label: Share on LinkedIn
+    google-analytics: "G-XK0ZCHXBQZ"
+
+
+
+
+
+    

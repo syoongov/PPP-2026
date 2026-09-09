@@ -1,0 +1,108 @@
+---
+title: "Research"
+format:
+  html:
+    theme: [sandstone, custom-june4.scss]
+    css: custom-june4.scss
+    toc: true
+    toc-location: right
+    page-layout: full
+    title-block-banner: false
+---
+
+<header style="text-align: center; padding: 40px 0; border-bottom: 1px solid #e0e0e0; margin-bottom: 40px;">
+  <a href="https://justice.utah.gov/" target="_blank" style="text-decoration: none;">
+    <img src="images/DOCJ_Logo_Small.png" alt="Utah Commission on Criminal & Juvenile Justice" style="max-height: 120px; margin-bottom: 20px; transition: transform 0.3s ease;">
+  </a>
+  <h1 style="color: #4A90E2; margin: 0; font-size: 2.5rem; font-weight: 600;"> </h1>
+</header>
+
+
+## 📖 Reports
+This report takes a risk mitigation approach to answer questions regarding prison capacity in the next 5 years. The report details the underlying research behind the development of the projections displayed on the dashboard which has been selected from a range of models. 
+
+```{r}
+#| label: pdf-embed
+#| echo: false
+
+library(htmltools)  
+
+HTML('
+<div class="header">
+  <a href="https://www.canva.com/design/DAGknp8Yjjk/dIuFsRix5H9n78RKTyBQQg/view?utm_content=DAGknp8Yjjk&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=hd7c13c3d3c" target="_blank">
+  <h3>April 2025 Capacity Report</h3>
+  </a>
+  <br>
+</div>
+')
+
+htmltools::tags$iframe(
+  src = "Utah-Prison-Projections-Capacity-Final-Report-April-2025.pdf",
+  width = "100%",
+  height = "700px",
+  style = "border: 1px solid #ddd;"
+)
+
+```
+
+## ⚖️ Policy Briefs (coming soon)
+
+
+
+
+## 📝 Resources
+This is an example tutorial of the Stock Flow Model adapted for Utah data. This resource was developed through the literature review process and interviewing other states' methods in prison projections. This resource may support alternative ways to project prison projections for future iterations of this project.
+
+```{r}
+#| label: pdf-embed2
+#| echo: false
+
+library(htmltools)  
+
+HTML('
+<div class="header">
+  <a href="https://www.canva.com/design/DAGfLjwpCcA/4wAf8O_29h8X1kQZOpxzYQ/view?utm_content=DAGfLjwpCcA&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=hd8b7dc4ead" target="_blank"> 
+  <h3>Stock Flow Models</h3>
+    </a>
+  <br>
+</div>
+')
+
+htmltools::tags$iframe(
+  src = "Stock_Flow_Model_Example.pdf",
+  width = "100%",
+  height = "700px",
+  style = "border: 1px solid #ddd;"
+)
+
+```
+
+
+## 🧭 Project Plan - Overview
+This document provides a progress update and an overview of the Utah Prison Population Projections project, outlining its phases, objectives, and key milestones.
+
+
+```{r}
+#| label: pdf-embed3
+#| echo: false
+
+library(htmltools)  
+
+HTML('
+<div class="header">
+<a href="https://www.canva.com/design/DAGfLjwpCcA/4wAf8O_29h8X1kQZOpxzYQ/view?utm_content=DAGfLjwpCcA&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=hd8b7dc4ead" target="_blank">
+  <h3>Project Plan</h3>
+    </a>
+  <br>
+</div>
+')
+
+htmltools::tags$iframe(
+  src = "PPP April Update-2025.pdf",
+  width = "100%",
+  height = "700px",
+  style = "border: 1px solid #ddd;"
+)
+
+```
+

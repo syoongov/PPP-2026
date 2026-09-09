@@ -1,0 +1,4 @@
+scenario,weight,total_adp_5yr,total_ann_growth,male_ann_growth,female_ann_growth,mean_qoq_growth
+central,20 / 80,7423,2.11,2.16,1.36,0.534
+bracket_a,0 / 100,7342,1.9,1.93,1.38,0.481
+bracket_b,50 / 50,7545,2.42,2.49,1.35,0.612
