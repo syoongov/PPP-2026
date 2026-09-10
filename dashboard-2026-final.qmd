@@ -1039,12 +1039,12 @@ ggplotly(p, tooltip = "text") %>%
 # Felony degrees only. MA, S, and "No Active Offense" are near-zero
 # flat lines that add panels without signal. MB excluded upstream.
 sev_keep <- adp_offense_severity %>%
-  filter(!Category %in% c("MA", "S", "No Active Offense", "FC")) %>%
+  filter(!Category %in% c("MA", "S", "No Active Offense")) %>%
   mutate(Category = recode(Category,
     "F1" = "F1 — First degree felony",
     "F2" = "F2 — Second degree felony",
     "F3" = "F3 — Third degree felony",
-    #"FC" = "FC — Capital felony"
+    "FC" = "FC — Capital felony"
   ))
 
 p <- ggplot(
