@@ -35,7 +35,7 @@ ANN_PCT   <- summ$total_ann_growth
 <header style="text-align:center; padding:40px 0 30px; border-bottom:1px solid #C6D0BE; margin-bottom:40px;">
   <a href="https://justice.utah.gov/" target="_blank">
     <img src="images/DOCJ_Logo_Small.png"
-         alt="Utah Commission on Criminal and Juvenile Justice"
+         alt="Utah Department of Criminal Justice"
          style="max-height:120px;">
   </a>
 </header>
@@ -118,8 +118,7 @@ Hover over a plot and click the camera icon in the toolbar to save it as an imag
 ## Acknowledgements
 
 The Utah Prison Projection Project (UPPP) is a collaborative effort between the
-Utah Department of Corrections (UDC) and the Commission on Criminal and Juvenile
-Justice. We are grateful to UDC for their partnership, expertise, and for
+Utah Department of Corrections (UDC) and the Utah Department of Criminal Justice. We are grateful to UDC for their partnership, expertise, and for
 providing the data that underpins this project.
 
 ## Contact
