@@ -1071,7 +1071,8 @@ p <- ggplot(
   ) +
   facet_wrap(
     ~Category,
-    ncol = 2
+    ncol = 2,
+    scales = "free_y"
   ) +
   labs(
     title = "Utah Prison Population by Offense Severity",
