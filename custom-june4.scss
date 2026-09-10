@@ -380,3 +380,10 @@ table.dataTable tbody td {
     padding: 3px 6px;
   }
 }
+
+
+// Hide the Expand control on nested/empty cards. Quarto renders one
+// per card; a nested card yields a duplicate button with nothing behind it.
+.card .card .bslib-full-screen-enter {
+  display: none !important;
+}

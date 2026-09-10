@@ -82,6 +82,7 @@ chart for interactive data exploration.
 - **Capacity benchmarking** — current and projected populations against UDC's
   three capacity thresholds: operational (96.5%), emergency (98%), and absolute
   maximum (100%).
+- **Note that capacity numbers are updated as of 2026 Q2 and fluctuate through time.**
 
 ### [Methodology](dashboard-2026-final.html#methodology)
 

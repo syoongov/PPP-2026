@@ -48,8 +48,6 @@ htmltools::tags$iframe(
 ## ⚖️ Policy Briefs (coming soon)
 
 
-
-
 ## 📝 Resources
 This is an example tutorial of the Stock Flow Model adapted for Utah data. This resource was developed through the literature review process and interviewing other states' methods in prison projections. This resource may support alternative ways to project prison projections for future iterations of this project.
 
@@ -98,7 +96,7 @@ HTML('
 ')
 
 htmltools::tags$iframe(
-  src = "PPP April Update-2025.pdf",
+  src = "PPP-April-Update-2025.pdf",
   width = "100%",
   height = "700px",
   style = "border: 1px solid #ddd;"
